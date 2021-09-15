@@ -3,6 +3,7 @@ package com.amazon.kinesis.kafka;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 import com.amazonaws.util.StringUtils;
 import com.google.common.util.concurrent.MoreExecutors;
@@ -12,6 +13,8 @@ import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
 import org.apache.kafka.connect.sink.SinkTaskContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.amazonaws.services.kinesis.producer.Attempt;
 import com.amazonaws.services.kinesis.producer.KinesisProducer;
@@ -24,6 +27,7 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 
 public class AmazonKinesisSinkTask extends SinkTask {
+	private final static Logger logger = LoggerFactory.getLogger(AmazonKinesisSinkTask.class);
 
 	private String streamName;
 
@@ -165,7 +169,7 @@ public class AmazonKinesisSinkTask extends SinkTask {
 					while (producer.getOutstandingRecordsCount() > outstandingRecordsThreshold) {
 						try {
 							// Pausing further
-							sinkTaskContext.pause((TopicPartition[]) sinkTaskContext.assignment().toArray());
+							sinkTaskContext.pause(convertTopicPartitionSetToArray(sinkTaskContext.assignment()));
 							pause = true;
 							Thread.sleep(sleepPeriod);
 							if (sleepCount++ > sleepCycles) {
@@ -183,7 +187,7 @@ public class AmazonKinesisSinkTask extends SinkTask {
 						}
 					}
 					if (pause)
-						sinkTaskContext.resume((TopicPartition[]) sinkTaskContext.assignment().toArray());
+						sinkTaskContext.resume(convertTopicPartitionSetToArray(sinkTaskContext.assignment()));
 				});
 				return true;
 			} else {
@@ -195,7 +199,7 @@ public class AmazonKinesisSinkTask extends SinkTask {
 				while (kinesisProducer.getOutstandingRecordsCount() > outstandingRecordsThreshold) {
 					try {
 						// Pausing further
-						sinkTaskContext.pause((TopicPartition[]) sinkTaskContext.assignment().toArray());
+						sinkTaskContext.pause(convertTopicPartitionSetToArray(sinkTaskContext.assignment()));
 						pause = true;
 						Thread.sleep(sleepPeriod);
 						if (sleepCount++ > sleepCycles) {
@@ -213,7 +217,7 @@ public class AmazonKinesisSinkTask extends SinkTask {
 					}
 				}
 				if (pause)
-					sinkTaskContext.resume((TopicPartition[]) sinkTaskContext.assignment().toArray());
+					sinkTaskContext.resume(convertTopicPartitionSetToArray(sinkTaskContext.assignment()));
 				return true;
 			}
 		} else {
@@ -358,8 +362,24 @@ public class AmazonKinesisSinkTask extends SinkTask {
 
 		// The namespace to upload metrics under.
 		config.setMetricsNamespace(metricsNameSpace);
+		logger.info("Before Creating Producer");
+		final KinesisProducer producer = new KinesisProducer(config);
+		logger.info("After Creating Producer : " + producer);
+		return producer;
+	}
 
-		return new KinesisProducer(config);
-
+	private TopicPartition[] convertTopicPartitionSetToArray(final Set<TopicPartition> partitionSet) {
+		if (partitionSet != null) {
+			final TopicPartition[] partitions = new TopicPartition[partitionSet.size()];
+			if (partitionSet.size() > 0) {
+				int index = 0;
+				for (TopicPartition partition : partitionSet) {
+					partitions[index++] = partition;
+				}
+			}
+			return partitions;
+		} else {
+			return null;
+		}
 	}
 }
