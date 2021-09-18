@@ -20,6 +20,8 @@ public class AmazonKinesisSinkConnector extends SinkConnector {
 
 	public static final String MAX_CONNECTIONS = "maxConnections";
 
+	public static final String MIN_CONNECTIONS = "minConnections";
+
 	public static final String RATE_LIMIT = "rateLimit";
 
 	public static final String RECORD_TTL = "ttl";
@@ -32,6 +34,18 @@ public class AmazonKinesisSinkConnector extends SinkConnector {
 
 	public static final String AGGREGRATION_ENABLED = "aggregration";
 
+	public static final String AGGREGRATION_MAX_SIZE = "aggregrationMaxSize";
+
+	public static final String AGGREGRATION_MAX_COUNT = "aggregrationMaxCount";
+
+	public static final String THREADING_MODEL = "threadModel";
+
+	public static final String THREAD_POOL_SIZE = "threadPoolSize";
+
+	public static final String COLLECTION_MAX_COUNT  = "collectionMaxCount";
+	
+	public static final String COLLECTION_MAX_SIZE  = "collectionMaxSize";
+	
 	public static final String USE_PARTITION_AS_HASH_KEY = "usePartitionAsHashKey";
 	
 	public static final String FLUSH_SYNC = "flushSync";
@@ -100,6 +114,20 @@ public class AmazonKinesisSinkConnector extends SinkConnector {
 	
 	private String sleepCycles;
 
+	private String aggregrationMaxSize;
+
+	private String aggregrationMaxCount;
+
+	private String minConnections;
+
+	private String threadingModel;
+
+	private String threadPoolSize;
+
+	private String collectionMaxCount;
+
+	private String collectionMaxSize;
+
 	@Override
 	public void start(Map<String, String> props) {
 		region = props.get(REGION);
@@ -124,6 +152,13 @@ public class AmazonKinesisSinkConnector extends SinkConnector {
 		outstandingRecordsThreshold = props.get(OUTSTANDING_RECORDS_THRESHOLD);
 		sleepPeriod = props.get(SLEEP_PERIOD);
 		sleepCycles = props.get(SLEEP_CYCLES);
+		aggregrationMaxSize = props.get(AGGREGRATION_MAX_SIZE);
+		aggregrationMaxCount = props.get(AGGREGRATION_MAX_COUNT);
+		minConnections = props.get(MIN_CONNECTIONS);
+		threadingModel = props.get(THREADING_MODEL);
+		threadPoolSize = props.get(THREAD_POOL_SIZE);
+		collectionMaxCount = props.get(COLLECTION_MAX_COUNT);
+		collectionMaxSize = props.get(COLLECTION_MAX_SIZE);
 	}
 
 	@Override
@@ -240,7 +275,42 @@ public class AmazonKinesisSinkConnector extends SinkConnector {
 				config.put(SLEEP_CYCLES, sleepCycles);
 			else
 				config.put(SLEEP_CYCLES, "10");
+
+			if(aggregrationMaxSize != null)
+				config.put(AGGREGRATION_MAX_SIZE, aggregrationMaxSize);
+			else
+				config.put(AGGREGRATION_MAX_SIZE, "1048576");
 			
+			if(aggregrationMaxCount != null)
+				config.put(AGGREGRATION_MAX_COUNT, aggregrationMaxCount);
+			else
+				config.put(AGGREGRATION_MAX_COUNT, "9223372036854775807");
+
+			if(minConnections != null)
+				config.put(MIN_CONNECTIONS, minConnections);
+			else
+				config.put(MIN_CONNECTIONS, "16");
+
+			if(threadingModel != null)
+				config.put(THREADING_MODEL, threadingModel);
+			else
+				config.put(THREADING_MODEL, "PER_REQUEST");
+
+			if(threadPoolSize != null)
+				config.put(THREAD_POOL_SIZE, threadPoolSize);
+			else
+				config.put(THREAD_POOL_SIZE, "25");
+
+			if(collectionMaxCount != null)
+				config.put(COLLECTION_MAX_COUNT, collectionMaxCount);
+			else
+				config.put(COLLECTION_MAX_COUNT, "500");
+
+			if(collectionMaxSize != null)
+				config.put(COLLECTION_MAX_SIZE, collectionMaxSize);
+			else
+				config.put(COLLECTION_MAX_SIZE, "5242880");
+
 			configs.add(config);
 
 		}

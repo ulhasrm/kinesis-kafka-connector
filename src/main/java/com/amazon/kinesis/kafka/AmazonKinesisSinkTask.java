@@ -21,6 +21,7 @@ import com.amazonaws.services.kinesis.producer.KinesisProducer;
 import com.amazonaws.services.kinesis.producer.KinesisProducerConfiguration;
 import com.amazonaws.services.kinesis.producer.UserRecordFailedException;
 import com.amazonaws.services.kinesis.producer.UserRecordResult;
+import com.amazonaws.services.kinesis.producer.KinesisProducerConfiguration.ThreadingModel;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
@@ -58,6 +59,20 @@ public class AmazonKinesisSinkTask extends SinkTask {
 	private String metricsNameSpace;
 
 	private boolean aggregration;
+
+	private long aggregrationMaxSize;
+
+	private long aggregrationMaxCount;
+
+	private int minConnections;
+
+	private KinesisProducerConfiguration.ThreadingModel threadingModel;
+
+	private int threadPoolSize;
+
+	private long collectionMaxCount;
+
+	private long collectionMaxSize;
 
 	private boolean usePartitionAsHashKey;
 
@@ -169,7 +184,7 @@ public class AmazonKinesisSinkTask extends SinkTask {
 					while (producer.getOutstandingRecordsCount() > outstandingRecordsThreshold) {
 						try {
 							// Pausing further
-							sinkTaskContext.pause(convertTopicPartitionSetToArray(sinkTaskContext.assignment()));
+							sinkTaskContext.pause(convertTopicPartitionSetToArray(sinkTaskContext.assignment(), true));
 							pause = true;
 							Thread.sleep(sleepPeriod);
 							if (sleepCount++ > sleepCycles) {
@@ -187,7 +202,7 @@ public class AmazonKinesisSinkTask extends SinkTask {
 						}
 					}
 					if (pause)
-						sinkTaskContext.resume(convertTopicPartitionSetToArray(sinkTaskContext.assignment()));
+						sinkTaskContext.resume(convertTopicPartitionSetToArray(sinkTaskContext.assignment(), false));
 				});
 				return true;
 			} else {
@@ -199,7 +214,7 @@ public class AmazonKinesisSinkTask extends SinkTask {
 				while (kinesisProducer.getOutstandingRecordsCount() > outstandingRecordsThreshold) {
 					try {
 						// Pausing further
-						sinkTaskContext.pause(convertTopicPartitionSetToArray(sinkTaskContext.assignment()));
+						sinkTaskContext.pause(convertTopicPartitionSetToArray(sinkTaskContext.assignment(), true));
 						pause = true;
 						Thread.sleep(sleepPeriod);
 						if (sleepCount++ > sleepCycles) {
@@ -217,7 +232,7 @@ public class AmazonKinesisSinkTask extends SinkTask {
 					}
 				}
 				if (pause)
-					sinkTaskContext.resume(convertTopicPartitionSetToArray(sinkTaskContext.assignment()));
+					sinkTaskContext.resume(convertTopicPartitionSetToArray(sinkTaskContext.assignment(), false));
 				return true;
 			}
 		} else {
@@ -289,6 +304,21 @@ public class AmazonKinesisSinkTask extends SinkTask {
 
 		sleepCycles = Integer.parseInt(props.get(AmazonKinesisSinkConnector.SLEEP_CYCLES));
 
+		aggregrationMaxCount = Long.parseLong(props.get(AmazonKinesisSinkConnector.AGGREGRATION_MAX_COUNT));
+
+		aggregrationMaxSize = Long.parseLong(props.get(AmazonKinesisSinkConnector.AGGREGRATION_MAX_SIZE));
+
+		minConnections = Integer.parseInt(props.get(AmazonKinesisSinkConnector.MIN_CONNECTIONS));
+
+		collectionMaxCount = Long.parseLong(props.get(AmazonKinesisSinkConnector.COLLECTION_MAX_COUNT));
+
+		collectionMaxSize = Long.parseLong(props.get(AmazonKinesisSinkConnector.COLLECTION_MAX_SIZE));
+
+		final String model = props.get(AmazonKinesisSinkConnector.THREADING_MODEL);
+		threadingModel = ThreadingModel.PER_REQUEST.name().equals(model) ? ThreadingModel.PER_REQUEST : ThreadingModel.POOLED;
+
+		threadPoolSize = Integer.parseInt(props.get(AmazonKinesisSinkConnector.THREAD_POOL_SIZE));
+
 		if (!singleKinesisProducerPerPartition)
 			kinesisProducer = getKinesisProducer();
 
@@ -335,6 +365,45 @@ public class AmazonKinesisSinkTask extends SinkTask {
 
 		config.setAggregationEnabled(aggregration);
 
+		// Maximum number of bytes to pack into an aggregated Kinesis record.
+		// Default: 51200
+		// Minimum: 64
+		// Maximum (inclusive): 1048576
+		config.setAggregationMaxSize(aggregrationMaxSize);
+
+		// Maximum number of items to pack into an aggregated record.
+		// Default: 4294967295
+		// Minimum: 1
+		// Maximum (inclusive): 9223372036854775807
+		config.setAggregationMaxCount(aggregrationMaxCount);
+
+		// Minimum number of connections to keep open to the backend.
+		// Default: 1
+		// Minimum: 1
+		// Maximum (inclusive): 16
+		config.setMinConnections(minConnections);
+
+		//Sets the threading model that the native process will use.
+		// Default = PER_REQUEST
+		// Options - PER_REQUEST, POOLED
+		if( ThreadingModel.POOLED.equals(threadingModel) )
+		{
+			config.setThreadingModel(threadingModel);
+			config.setThreadPoolSize(threadPoolSize);
+		}
+		
+		// Maximum number of items to pack into an PutRecords request.
+		// Default: 500
+		// Minimum: 1
+		// Maximum (inclusive): 500
+		config.setCollectionMaxCount(collectionMaxCount);
+
+		// Maximum amount of data to send with a PutRecords request.
+		// Default: 5242880
+		// Minimum: 52224
+		// Maximum (inclusive): 9223372036854775807
+		config.setCollectionMaxSize(collectionMaxSize);
+
 		// Limits the maximum allowed put rate for a shard, as a percentage of
 		// the
 		// backend limits.
@@ -365,21 +434,47 @@ public class AmazonKinesisSinkTask extends SinkTask {
 		logger.info("Before Creating Producer");
 		final KinesisProducer producer = new KinesisProducer(config);
 		logger.info("After Creating Producer : " + producer);
+		printProducerConfig(config);
 		return producer;
 	}
 
-	private TopicPartition[] convertTopicPartitionSetToArray(final Set<TopicPartition> partitionSet) {
-		if (partitionSet != null) {
+	private TopicPartition[] convertTopicPartitionSetToArray(final Set<TopicPartition> partitionSet, final boolean pause ) {
+		final String action = pause ? "Pause":"Resume";
+		if (partitionSet != null && partitionSet.size() > 0) {
+			logger.info(action + " " + partitionSet );
 			final TopicPartition[] partitions = new TopicPartition[partitionSet.size()];
-			if (partitionSet.size() > 0) {
 				int index = 0;
 				for (TopicPartition partition : partitionSet) {
 					partitions[index++] = partition;
 				}
-			}
 			return partitions;
 		} else {
+			logger.info(action + " empty Partitions");
 			return null;
 		}
+	}
+
+	private void printProducerConfig(final KinesisProducerConfiguration config)
+	{
+		final StringBuilder sb = new StringBuilder();
+		sb.append("aggregationEnabled: " + config.isAggregationEnabled() + "\n" );
+		sb.append("aggregationMaxCount: " + config.getAggregationMaxCount() + "\n" );
+		sb.append("aggregationMaxSize: " + config.getAggregationMaxSize() + "\n" );
+		sb.append("collectionMaxCount: " + config.getCollectionMaxCount() + "\n" );
+		sb.append("CollectionMaxSize: " + config.getCollectionMaxSize() + "\n" );
+		sb.append("minConnections: " + config.getMinConnections() + "\n" );
+		sb.append("MaxConnections: " + config.getMaxConnections() + "\n" );
+		sb.append("threadingModel: " + config.getThreadingModel().name() + "\n" );
+		sb.append("threadPoolSize: " + config.getThreadPoolSize() + "\n" );
+		sb.append("connectTimeout: " + config.getConnectTimeout() + "\n" );
+		sb.append("metricsGranularity: " + config.getMetricsGranularity() + "\n" );
+		sb.append("metricsLevel: " + config.getMetricsLevel() + "\n" );
+		sb.append("rateLimit: " + config.getRateLimit() + "\n" );
+		sb.append("recordMaxBufferedTime: " + config.getRecordMaxBufferedTime() + "\n" );
+		sb.append("recordTtl: " + config.getRecordTtl() + "\n" );
+		sb.append("connectTimeout: " + config.getRegion() + "\n" );
+		sb.append("requestTimeout: " + config.getRequestTimeout() + "\n" );
+		sb.append("failIfThrottled: " + config.isFailIfThrottled() + "\n" );
+		logger.info("ProducerConfig : \n" + sb.toString() );
 	}
 }
